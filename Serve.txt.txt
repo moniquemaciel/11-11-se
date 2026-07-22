@@ -1,0 +1,190 @@
+// Backend do Checkout Transparente (Checkout API) — Ritual 11:11
+// Usa as credenciais do Mercado Pago via variáveis de ambiente.
+// O Access Token NUNCA é enviado ao navegador — ele só existe aqui no servidor.
+
+require('dotenv').config();
+const express = require('express');
+const cors = require('cors');
+const { MercadoPagoConfig, Payment } = require('mercadopago');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+if (!process.env.MERCADO_PAGO_ACCESS_TOKEN) {
+  console.warn('⚠️  MERCADO_PAGO_ACCESS_TOKEN não definido. Configure a variável de ambiente antes de aceitar pagamentos reais.');
+}
+
+const client = new MercadoPagoConfig({
+  accessToken: process.env.MERCADO_PAGO_ACCESS_TOKEN,
+});
+const payment = new Payment(client);
+
+// ---------------------------------------------------------------
+// Planos do Ritual 11:11 — mantenha os valores aqui, nunca confie
+// em um valor de preço enviado pelo frontend (evita fraude de preço).
+// ---------------------------------------------------------------
+const PLANS = {
+  essencial: { name: 'Ritual 11:11 — Essencial', amount: 97.0 },
+  classico: { name: 'Ritual 11:11 — Clássico', amount: 197.0 },
+  premium: { name: 'Ritual 11:11 — Premium', amount: 397.0 },
+};
+
+// Armazenamento simples em memória — troque por um banco de dados
+// (Postgres, MongoDB etc.) antes de usar em produção. Em memória,
+// os pedidos somem toda vez que o servidor reinicia.
+const orders = new Map();
+
+// -----------------------------------------------------------------
+// PIX
+// -----------------------------------------------------------------
+app.post('/api/pagamento/pix', async (req, res) => {
+  const { plano, email, nome, docType, docNumber } = req.body;
+  const plan = PLANS[plano];
+  if (!plan) return res.status(400).json({ error: 'Plano inválido' });
+
+  try {
+    const result = await payment.create({
+      body: {
+        transaction_amount: plan.amount,
+        description: plan.name,
+        payment_method_id: 'pix',
+        payer: {
+          email: email,
+          first_name: nome || undefined,
+          identification: docType && docNumber ? { type: docType, number: docNumber } : undefined,
+        },
+      },
+    });
+
+    orders.set(result.id, { plano, status: result.status, criadoEm: new Date() });
+
+    res.json({
+      orderId: result.id,
+      status: result.status,
+      qrCodeBase64: result.point_of_interaction.transaction_data.qr_code_base64,
+      copiaECola: result.point_of_interaction.transaction_data.qr_code,
+    });
+  } catch (err) {
+    console.error('Erro ao criar pagamento Pix:', err);
+    res.status(500).json({ error: 'Erro ao criar pagamento Pix' });
+  }
+});
+
+// -----------------------------------------------------------------
+// CARTÃO DE CRÉDITO
+// O token do cartão é gerado NO FRONTEND pelo SDK.js do Mercado Pago
+// (o número do cartão nunca passa pelo seu servidor — isso é exigido
+// para conformidade PCI). Aqui só recebemos o token já criado.
+// -----------------------------------------------------------------
+app.post('/api/pagamento/cartao', async (req, res) => {
+  const { plano, token, installments, paymentMethodId, issuerId, email, docType, docNumber } = req.body;
+  const plan = PLANS[plano];
+  if (!plan) return res.status(400).json({ error: 'Plano inválido' });
+  if (!token) return res.status(400).json({ error: 'Token do cartão ausente' });
+
+  try {
+    const result = await payment.create({
+      body: {
+        transaction_amount: plan.amount,
+        token,
+        description: plan.name,
+        installments: installments || 1,
+        payment_method_id: paymentMethodId,
+        issuer_id: issuerId,
+        payer: {
+          email,
+          identification: { type: docType, number: docNumber },
+        },
+      },
+    });
+
+    orders.set(result.id, { plano, status: result.status, criadoEm: new Date() });
+    res.json({ orderId: result.id, status: result.status, statusDetail: result.status_detail });
+  } catch (err) {
+    console.error('Erro ao processar cartão:', err);
+    res.status(500).json({ error: 'Erro ao processar cartão' });
+  }
+});
+
+// -----------------------------------------------------------------
+// BOLETO
+// -----------------------------------------------------------------
+app.post('/api/pagamento/boleto', async (req, res) => {
+  const { plano, email, nome, sobrenome, docType, docNumber } = req.body;
+  const plan = PLANS[plano];
+  if (!plan) return res.status(400).json({ error: 'Plano inválido' });
+
+  try {
+    const result = await payment.create({
+      body: {
+        transaction_amount: plan.amount,
+        description: plan.name,
+        payment_method_id: 'bolbradesco',
+        payer: {
+          email,
+          first_name: nome,
+          last_name: sobrenome,
+          identification: { type: docType, number: docNumber },
+        },
+      },
+    });
+
+    orders.set(result.id, { plano, status: result.status, criadoEm: new Date() });
+    res.json({
+      orderId: result.id,
+      status: result.status,
+      linkBoleto: result.transaction_details.external_resource_url,
+    });
+  } catch (err) {
+    console.error('Erro ao gerar boleto:', err);
+    res.status(500).json({ error: 'Erro ao gerar boleto' });
+  }
+});
+
+// -----------------------------------------------------------------
+// WEBHOOK — o Mercado Pago chama esta rota sempre que o status de um
+// pagamento muda (aprovado, recusado, estornado etc). É aqui que você
+// libera o acesso do cliente / marca a assinatura como ativa.
+//
+// Configure esta URL no painel do Mercado Pago em:
+// Sua conta → Configurações → Webhooks
+// Ex: https://seu-dominio.com/api/webhook
+// -----------------------------------------------------------------
+app.post('/api/webhook', async (req, res) => {
+  const { type, data } = req.body;
+
+  if (type === 'payment' && data && data.id) {
+    try {
+      const info = await payment.get({ id: data.id });
+      const existing = orders.get(info.id) || {};
+      orders.set(info.id, { ...existing, status: info.status, atualizadoEm: new Date() });
+
+      console.log(`Pedido ${info.id} → status: ${info.status}`);
+
+      if (info.status === 'approved') {
+        // TODO: liberar acesso do cliente, enviar e-mail de boas-vindas,
+        // ativar a assinatura no seu sistema, etc.
+      }
+    } catch (err) {
+      console.error('Erro ao processar webhook:', err);
+    }
+  }
+
+  // Responda 200 rapidamente — o Mercado Pago reenvia se não receber OK.
+  res.sendStatus(200);
+});
+
+// -----------------------------------------------------------------
+// Consulta de status — útil para o frontend checar se o Pix já caiu
+// -----------------------------------------------------------------
+app.get('/api/pedido/:id', (req, res) => {
+  const order = orders.get(Number(req.params.id));
+  if (!order) return res.status(404).json({ error: 'Pedido não encontrado' });
+  res.json(order);
+});
+
+app.use(express.static('public'));
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Servidor rodando na porta ${PORT}`));
