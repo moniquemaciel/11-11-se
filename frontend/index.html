@@ -308,6 +308,14 @@
   .co-field-row{ display: flex; gap: 12px; }
   .co-field-row .co-field{ flex: 1; }
   .co-boleto-note{ font-size: 13px; line-height: 1.7; color: var(--muted); padding: 8px 0 16px; }
+  .co-method-note{
+    font-size: 12px; line-height: 1.6; color: var(--muted);
+    background: rgba(247,243,234,0.04); border: 1px solid var(--line);
+    border-radius: 3px; padding: 10px 12px; margin-bottom: 18px;
+  }
+  .co-method-note-recurring{
+    color: var(--gold-soft); border-color: var(--gold); background: rgba(184,145,43,0.08);
+  }
   .co-confirm-btn{ display: block; width: 100%; background: var(--gold); color: var(--navy-deep); border: none; font-family: 'Jost', sans-serif; font-size: 12px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; padding: 16px; cursor: pointer; border-radius: 2px; margin-top: 28px; transition: background 0.3s ease; }
   .co-confirm-btn:hover{ background: var(--gold-soft); }
   .co-confirm-btn:disabled{ opacity: 0.5; cursor: not-allowed; }
@@ -2258,6 +2266,7 @@
         </div>
 
         <div class="co-pay-panel active" id="panel-pix">
+          <p class="co-method-note">Cobrança única deste ciclo. Pix ainda não recorre sozinho — você volta aqui todo mês pra renovar.</p>
           <div class="co-field"><label>Nome completo</label><input type="text" id="pix-nome" placeholder="Seu nome completo"></div>
           <div class="co-field-row">
             <div class="co-field">
@@ -2281,6 +2290,7 @@
         </div>
 
         <div class="co-pay-panel" id="panel-cartao">
+          <p class="co-method-note co-method-note-recurring">✦ Cobrança automática todo mês, direto no cartão — sem precisar voltar aqui. Cancele quando quiser.</p>
           <div class="co-field"><label>Número do cartão</label><input type="text" id="card-number" placeholder="0000 0000 0000 0000" maxlength="19"></div>
           <div class="co-field"><label>Nome impresso no cartão</label><input type="text" id="card-name" placeholder="Como está no cartão"></div>
           <div class="co-field-row">
@@ -2300,6 +2310,7 @@
         </div>
 
         <div class="co-pay-panel" id="panel-boleto">
+          <p class="co-method-note">Cobrança única deste ciclo. Boleto não recorre sozinho — você volta aqui todo mês pra renovar.</p>
           <div class="co-field"><label>Nome</label><input type="text" id="boleto-nome" placeholder="Nome"></div>
           <div class="co-field"><label>Sobrenome</label><input type="text" id="boleto-sobrenome" placeholder="Sobrenome"></div>
           <div class="co-field-row">
@@ -3751,14 +3762,17 @@
           const data = await resp.json();
           if (data.status === 'approved') {
             clearInterval(statusPollTimer);
-            mostrarSucesso('Pix identificado! Sua assinatura foi confirmada.');
+            mostrarSucesso('Pix identificado! Seu ritual deste mês está confirmado. Guarde a data — daqui a 30 dias você volta aqui pra renovar.');
           }
         } catch (e) { /* silencioso, tenta de novo no próximo ciclo */ }
       }, 4000);
     }
 
     // -----------------------------------------------------------------
-    // CARTÃO — tokeniza no navegador via SDK do Mercado Pago
+    // CARTÃO — assinatura recorrente de verdade (cobrança automática
+    // todo mês). Tokeniza no navegador via SDK do Mercado Pago e cria
+    // uma Assinatura (Preapproval) no backend — não é mais um pagamento
+    // avulso.
     // -----------------------------------------------------------------
     async function processarCartao(email){
       const cardNumber = document.getElementById('card-number').value.replace(/\s/g, '');
@@ -3787,45 +3801,27 @@
         throw new Error('Não foi possível validar o cartão. Confira os dados.');
       }
 
-      const bin = cardNumber.substring(0, 8);
-      const pmResp = await mpInstance.getPaymentMethods({ bin });
-      const paymentMethodId = pmResp.results && pmResp.results[0] ? pmResp.results[0].id : null;
-
-      if (!paymentMethodId) {
-        throw new Error('Não reconhecemos a bandeira desse cartão. Confira o número digitado.');
-      }
-
-      let issuerId = null;
-      try {
-        const issuersResp = await mpInstance.getIssuers({ paymentMethodId, bin });
-        issuerId = Array.isArray(issuersResp) && issuersResp[0] ? issuersResp[0].id : null;
-      } catch (e) {
-        // Alguns métodos de pagamento não têm emissor associado — segue sem issuerId.
-      }
-
-      const resp = await fetch(`${BACKEND_URL}/api/pagamento/cartao`, {
+      const resp = await fetch(`${BACKEND_URL}/api/assinatura/cartao`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           plano: planoAtual,
           token: cardToken.id,
-          installments: 1,
-          paymentMethodId,
-          issuerId,
           email,
           docType,
           docNumber
         })
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || 'Erro ao processar cartão');
+      if (!resp.ok) throw new Error(data.error || 'Erro ao criar assinatura');
 
-      if (data.status === 'approved') {
-        mostrarSucesso('Pagamento aprovado! Sua assinatura foi confirmada.');
-      } else if (data.status === 'in_process' || data.status === 'pending') {
-        mostrarSucesso('Pagamento em análise. Você recebe a confirmação em breve.');
+      if (data.status === 'authorized') {
+        const preco = (plans[planoAtual] && plans[planoAtual].priceLabel) || '';
+        mostrarSucesso('Assinatura ativada! A partir de agora, ' + preco.replace('/mês', '') + ' será cobrado automaticamente todo mês no seu cartão. Você pode cancelar quando quiser.');
+      } else if (data.status === 'pending') {
+        mostrarSucesso('Assinatura criada e aguardando confirmação do seu banco. Você recebe a confirmação em breve.');
       } else {
-        throw new Error('Pagamento recusado (' + (data.statusDetail || data.status) + '). Tente outro cartão.');
+        throw new Error('Não foi possível ativar a assinatura (' + data.status + '). Tente outro cartão.');
       }
     }
 
@@ -3850,7 +3846,7 @@
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Erro ao gerar boleto');
 
-      mostrarSucesso('Boleto gerado! <a href="' + data.linkBoleto + '" target="_blank" style="color:inherit;">Clique aqui para visualizar</a> e pagar em até 3 dias úteis.');
+      mostrarSucesso('Boleto gerado! <a href="' + data.linkBoleto + '" target="_blank" style="color:inherit;">Clique aqui para visualizar</a> e pagar em até 3 dias úteis. Guarde a data — daqui a 30 dias você volta aqui pra renovar.');
     }
 
     function mostrarSucesso(mensagemHtml){
