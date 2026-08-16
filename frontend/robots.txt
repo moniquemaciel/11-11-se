@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://loja.11e11-se.com.br/sitemap.xml

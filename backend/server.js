@@ -12,7 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 if (!process.env.MERCADO_PAGO_ACCESS_TOKEN) {
-  console.warn('⚠️  MERCADO_PAGO_ACCESS_TOKEN não definido. Configure a variável de ambiente antes de aceitar pagamentos reais.');
+  console.warn('⚠️  MERCADO_PAGO_ACCESS_TOKEN não definido. Configure a variável de ambiente.');
 }
 
 const client = new MercadoPagoConfig({
@@ -25,9 +25,9 @@ const payment = new Payment(client);
 // em um valor de preço enviado pelo frontend (evita fraude de preço).
 // ---------------------------------------------------------------
 const PLANS = {
-  essencial: { name: 'Ritual 11:11 — Essencial', amount: 97.0 },
-  classico: { name: 'Ritual 11:11 — Clássico', amount: 197.0 },
-  premium: { name: 'Ritual 11:11 — Premium', amount: 397.0 },
+  essencial: { name: 'Ritual 11:11 — Essencial', amount: 69.0 },
+  classico: { name: 'Ritual 11:11 — Clássico', amount: 99.0 },
+  premium: { name: 'Ritual 11:11 — Premium', amount: 169.0 },
 };
 
 // Armazenamento simples em memória — troque por um banco de dados
@@ -100,6 +100,7 @@ app.post('/api/pagamento/cartao', async (req, res) => {
     });
 
     orders.set(result.id, { plano, status: result.status, criadoEm: new Date() });
+
     res.json({ orderId: result.id, status: result.status, statusDetail: result.status_detail });
   } catch (err) {
     console.error('Erro ao processar cartão:', err);
@@ -131,6 +132,7 @@ app.post('/api/pagamento/boleto', async (req, res) => {
     });
 
     orders.set(result.id, { plano, status: result.status, criadoEm: new Date() });
+
     res.json({
       orderId: result.id,
       status: result.status,

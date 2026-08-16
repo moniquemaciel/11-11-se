@@ -1,0 +1,22 @@
+{
+  "name": "Ritual 11:11 — 11:11-se",
+  "short_name": "Ritual 11:11",
+  "description": "Assinatura mensal Ritual 11:11 — uma edição ritual diferente a cada mês, com peças curadas pela 11:11-se.",
+  "start_url": "https://loja.11e11-se.com.br/",
+  "scope": "https://loja.11e11-se.com.br/",
+  "display": "standalone",
+  "background_color": "#0E1526",
+  "theme_color": "#1B2740",
+  "icons": [
+    {
+      "src": "/assets/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/assets/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

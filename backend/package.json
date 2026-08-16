@@ -1,7 +1,7 @@
 {
-  "name": "ritual-1111-checkout-transparente",
+  "name": "ritual-1111-backend",
   "version": "1.0.0",
-  "description": "Backend do Checkout Transparente (Checkout API) do Ritual 11:11, usando o Mercado Pago",
+  "description": "Backend do Checkout Transparente (Mercado Pago) — Ritual 11:11",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
